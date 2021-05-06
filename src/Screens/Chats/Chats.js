@@ -1,0 +1,193 @@
+import React, { Component } from 'react';
+import { View, Text, StyleSheet, Image } from 'react-native';
+import imagePath from '../../constants/imagePath';
+import { GiftedChat } from 'react-native-gifted-chat'; // 0.2.5
+import fontFamily from '../../styles/fontFamily';
+import { connect } from 'react-redux';
+import colors from '../../styles/colors';
+import actions from '../../redux/actions';
+import socketServices from '../../utils/socketService';
+import { SOCKET_STRINGS } from '../../constants/socketStrings';
+import commonStyles from '../../styles/commonStyles';
+
+class Chats extends Component {
+  state = {
+    messages: [],
+  };
+
+  componentDidMount() {
+    const { userData } = this.props;
+
+    this.apicall();
+    socketServices.on(SOCKET_STRINGS.RECEIVED_MESSAGE, this.onReceiveMessage);
+  }
+
+  apicall = () => {
+    const { commonId, image, name } = this.props.route.params;
+
+    this.setState({ isLoading: true });
+    actions
+      .userConversation(commonId, 100)
+      .then(res => {
+        const messages = res.data.map((data, index) => {
+          let message = {
+            _id: data._id,
+            text: data.text,
+            createdAt: data.createdAt,
+            user: {
+              _id: data.senderId._id,
+              name: name,
+              avatar: image[0].original,
+            },
+          };
+          if (!!data.repliedToText) {
+            message.replyText = data.repliedToText;
+          }
+          return message;
+        });
+        this.setState({ isLoading: false, messages });
+      })
+      .catch(err => {
+        this.setState({ isLoading: false });
+        console.log(err);
+      });
+  };
+
+  onSend(messages = []) {
+    if (String(messages[0].text).trim().length < 1) {
+      return;
+    }
+    const { id, commonId } = this.props.route.params;
+    const { userData } = this.props;
+    // To send new message
+    socketServices.emit(SOCKET_STRINGS.SEND_MESSAGE, {
+      senderId: userData._id,
+      recieverId: id,
+      commonConversationId: commonId,
+      messageType: 'Text',
+      text: messages[0].text,
+    });
+    this.setState(previousState => ({
+      messages: GiftedChat.append(previousState.messages, messages),
+    }));
+  }
+
+
+
+  onReceiveMessage = data => {
+
+    const {
+      commonId,
+      name,
+      image,
+    } = this.props.route.params;
+
+    const message = {
+      _id: data._id,
+      text: data.text,
+      createdAt: data.createdAt,
+      user: {
+        _id: data.senderId,
+        name: name,
+        avatar: image && image[0].thumbnail,
+      },
+    };
+    //To make sure that all the messages are seen if new message comes
+
+    if (data.commonConversationId === commonId) {
+      socketServices.emit(SOCKET_STRINGS.SEEN_ALL_MESSAGES, {
+        senderId: data.senderId,
+        isRead: true,
+        recieverId: data.recieverId,
+      });
+
+      this.setState(previousState => ({
+        messages: GiftedChat.append(previousState.messages, message),
+      }));
+    }
+  };
+  render() {
+    const { themeColor, userData } = this.props;
+    const { name, image, commonId } = this.props.route.params;
+    const SendButton = props => {
+      return (
+        <View style={styles.sendButtonView}>
+          <Image
+            source={imagePath.sent}
+            style={{ height: 25, width: 25, tintColor: themeColor }}
+          />
+        </View>
+      );
+    };
+    return (
+      <View style={styles.chatView}>
+        <View style={styles.subChatView}>
+          <Image
+            style={styles.chatViewImage}
+            source={{ uri: image[0].original }}
+          />
+          <View
+            style={styles.nameView}>
+            <Text
+              style={{
+                fontFamily: fontFamily.bold,
+                ...commonStyles.mediumFont20,
+                color: themeColor,
+              }}>
+              {name}
+            </Text>
+          </View>
+        </View>
+
+        <GiftedChat
+          children={<SendButton />}
+          messages={this.state.messages}
+          onSend={messages => this.onSend(messages)}
+          user={{
+            _id: userData._id,
+          }}
+        />
+      </View>
+    );
+  }
+}
+const styles = StyleSheet.create({
+  navSignup: {
+    backgroundColor: colors.white,
+    height: 50,
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  sendButtonView: {
+    marginHorizontal: 15,
+    alignSelf: 'center',
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginVertical: 10,
+  },
+  chatView: { flex: 1, backgroundColor: colors.lightGrey },
+  subChatView: {
+    flexDirection: 'row',
+    height: 60,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    paddingHorizontal: 10,
+  },
+  chatViewImage: { height: 40, width: 40, borderRadius: 50 },
+  nameView: {
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+});
+
+const mapStateToProps = state => {
+  return {
+    themeColor: state.themeReducer.themeColor,
+    userData: state.auth.userData,
+  };
+};
+export default connect(mapStateToProps)(Chats);
